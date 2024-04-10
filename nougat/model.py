@@ -185,7 +185,7 @@ class SwinEncoder(nn.Module):
             delta_width - pad_width,
             delta_height - pad_height,
         )
-        return self.to_tensor(ImageOps.expand(img, padding))
+        return self.to_tensor(ImageOps.expand(img, padding, 0xffffff))
 
 
 class BARTDecoder(nn.Module):
