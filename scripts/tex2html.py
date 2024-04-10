@@ -1,5 +1,4 @@
 import datetime
-import glob
 import os
 import argparse
 import time
@@ -13,7 +12,7 @@ from common import LatexError, find_main_tex, get_file_list
 
 def write_error_log(logs_dir, arxiv_id, error_name, tex_dir, error_detail, lock):
     yymm = arxiv_id[:4]
-    log_path = os.path.join(logs_dir, "pdf", f"{yymm}.jsonl")
+    log_path = os.path.join(logs_dir, "html", f"{yymm}.jsonl")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     log_entry = {
         "arxiv_id": arxiv_id,
@@ -27,39 +26,27 @@ def write_error_log(logs_dir, arxiv_id, error_name, tex_dir, error_detail, lock)
             log_file.write(json.dumps(log_entry) + "\n")
 
 
-def export_to_pdf(args):
-    tex_dir, pdf_path, logs_dir, lock = args
-    arxiv_id = os.path.splitext(os.path.basename(pdf_path))[0]
+def export_to_html(args):
+    tex_dir, html_path, logs_dir, lock = args
+    arxiv_id = os.path.splitext(os.path.basename(html_path))[0]
     try:
-        # Get the directory containing main.tex
-        main_tex_path = find_main_tex(tex_dir)
-        start_time = time.time()
+        main_tex_file = find_main_tex(tex_dir)
+        main_tex_path = os.path.join(tex_dir, main_tex_file)
 
-        # Run pdflatex to generate the PDF
         process = subprocess.Popen(
-            ["pdflatex", "-interaction=nonstopmode", main_tex_path],
-            cwd=tex_dir,
+            ["latexml", "--dest=" + html_path, main_tex_path],
+            # cwd=tex_dir,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         try:
-            process.communicate(timeout=60)  # 设置超时时间为60秒
+            process.communicate(timeout=180)
         except subprocess.TimeoutExpired:
-            process.kill()  # 超时后强行终止进程
-            raise LatexError("export_to_pdf", "PdfLaTeX process timed out.")
+            process.kill()
+            raise LatexError("export_to_html", "LaTeXML process timed out.")
 
-        # Find the generated PDF file by timestamp
-        pdf_files = [f for f in os.listdir(tex_dir) if f.endswith(".pdf")]
-        expected_pdf_path = None
-        for pdf_file in pdf_files:
-            file_path = os.path.join(tex_dir, pdf_file)
-            if os.path.getmtime(file_path) > start_time:
-                expected_pdf_path = file_path
-                break
-        if expected_pdf_path is None:
-            raise LatexError("export_to_pdf", "No newly generated .pdf file found.")
-        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
-        os.rename(expected_pdf_path, pdf_path)
+        if not os.path.exists(html_path):
+            raise LatexError("export_to_html", "No generated .html file found.")
 
         return True
     except LatexError as e:
@@ -75,22 +62,22 @@ def export_to_pdf(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Export arXiv TeX files to PDF.")
+    parser = argparse.ArgumentParser(description="Export arXiv TeX files to HTML.")
     parser.add_argument("--input", "-I", help="Input directory", default="./data/tex")
-    parser.add_argument("--output", "-O", help="Output directory", default="./data/pdf")
+    parser.add_argument("--output", "-O", help="Output directory", default="./data/html")
     parser.add_argument("--logs_dir", "-L", help="Logs directory", default="./logs")
-    parser.add_argument("--skip", "-S", help="Skip existing PDFs", action="store_true")
+    parser.add_argument("--skip", "-S", help="Skip existing HTML files", action="store_true")
     parser.add_argument("--start", default="0000_000", help="Start of the range (YYMM_xxx format)")
     parser.add_argument("--end", default="2404_000", help="End of the range (YYMM_xxx format)")
     parser.add_argument("--arxiv_id", help="Process a single arXiv ID")
     parser.add_argument("--workers", "-W", type=int, default=-1, help="Number of worker processes")
     args = parser.parse_args()
 
-    file_list = get_file_list(args, ".pdf")
+    file_list = get_file_list(args, ".html")
 
     with Manager() as manager:
         lock = manager.Lock()
-        export_args = [(tex_dir, pdf_path, args.logs_dir, lock) for tex_dir, pdf_path in file_list]
+        export_args = [(tex_dir, html_path, args.logs_dir, lock) for tex_dir, html_path in file_list]
 
         workers = args.workers
         if workers == -1:
@@ -98,7 +85,7 @@ def main():
         with Pool(processes=workers) as pool:
             error_count = 0
             with tqdm(total=len(file_list), unit="file") as pbar:
-                for result in pool.imap_unordered(export_to_pdf, export_args):
+                for result in pool.imap_unordered(export_to_html, export_args):
                     if not result:
                         error_count += 1
                     pbar.update(1)
