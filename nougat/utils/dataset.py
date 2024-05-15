@@ -132,7 +132,7 @@ class SciPDFDataset(Dataset):
     Args:
         path_to_index (str): Path to the index file.
         split (str, optional): Split of the dataset (e.g., "train", "test"). Default is "train".
-        root_name (str, optional): Root directory name. Default is an empty string.
+        subdir_name (str, optional): image 字段相对路径基于 path_to_root / subdir_name. Default is "".
         template (str, optional): Template for split naming. Default is "%s".
 
     Attributes:
@@ -145,19 +145,14 @@ class SciPDFDataset(Dataset):
         self,
         path_to_index: str,
         split: str = "train",
-        root_name="",
-        template="%s",
+        subdir_name="",
     ) -> None:
         super().__init__()
         self.path_to_index = Path(path_to_index)
-        self.root_name = root_name
         self.path_to_root = self.path_to_index.parent
-        if not split in self.path_to_index.stem:
-            pti = self.path_to_root / (template % split + ".jsonl")
-            if pti.exists():
-                self.path_to_index = pti
-            else:
-                raise ValueError(f'Dataset file for split "{split}" not found: {pti}')
+        self.subdir_name = subdir_name
+        if not self.path_to_index.exists():
+            raise ValueError(f'Dataset file for split "{split}" not found: {self.path_to_index}')
         self.dataset_file = None  # mulitprocessing
         # load seek map
         seek_path = self.path_to_root / (self.path_to_index.stem + ".seek.map")
@@ -168,6 +163,9 @@ class SciPDFDataset(Dataset):
                 'No "%s" found in %s' % (seek_path.name, str(self.path_to_root))
             )
         self.dataset_length = len(self.seek_map)
+        # test image path
+        test_item = self[0]
+        print(f"test item image: {test_item['image']}")
 
     def __len__(self) -> int:
         return self.dataset_length
@@ -189,7 +187,7 @@ class SciPDFDataset(Dataset):
                 line,
             )
             return self.empty_sample
-        img_path: Path = self.path_to_root / self.root_name / data.pop("image")
+        img_path: Path = self.path_to_root / self.subdir_name / data.pop("image")
         if not img_path.exists():
             logging.info("Sample %s could not be found.", img_path)
             return self.empty_sample
@@ -225,9 +223,8 @@ class NougatDataset(Dataset):
         self.split = split
         self.perturb = "NOUGAT_PERTURB" in os.environ and os.environ["NOUGAT_PERTURB"]
         # TODO improve naming conventions
-        template = "%s"
         self.dataset = SciPDFDataset(
-            dataset_path, split=self.split, template=template, root_name=root_name
+            dataset_path, split=self.split, subdir_name=root_name
         )
         self.dataset_length = len(self.dataset)
 

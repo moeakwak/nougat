@@ -27,11 +27,11 @@ from sconf import Config
 from nougat import NougatDataset
 from lightning_module import NougatDataPLModule, NougatModelPLModule
 
-try:
-    import wandb
-    from lightning.pytorch.loggers import WandbLogger as Logger
-except ModuleNotFoundError:
-    from lightning.pytorch.loggers.tensorboard import TensorBoardLogger as Logger
+# try:
+#     import wandb
+#     from lightning.pytorch.loggers import WandbLogger as Logger
+# except ModuleNotFoundError:
+#     from lightning.pytorch.loggers.tensorboard import TensorBoardLogger as Logger
 
 import logging
 
@@ -127,9 +127,10 @@ def save_config_file(config, path):
         os.makedirs(path)
     save_path = Path(path) / "config.yaml"
     print(config.dumps())
+    print("===============================")
     with open(save_path, "w") as f:
         f.write(config.dumps(modified_color=None, quote_str=True))
-        print(f"Config is saved at {save_path}")
+        print(f"Config is saved at {save_path}.")
 
 
 def train(config):
@@ -141,23 +142,28 @@ def train(config):
     """
     pl.seed_everything(config.get("seed", 42), workers=True)
 
+    print("Loading model and data modules...")
     model_module = NougatModelPLModule(config)
     data_module = NougatDataPLModule(config)
 
     # add datasets to data_module
     datasets = {"train": [], "validation": []}
-    for i, dataset_path in enumerate(config.dataset_paths):
-        for split in ["train", "validation"]:
-            datasets[split].append(
-                NougatDataset(
-                    dataset_path=dataset_path,
-                    nougat_model=model_module.model,
-                    max_length=config.max_length,
-                    split=split,
-                )
+    dataset_pathes_by_split = config.dataset_pathes_by_split
+    assert len(dataset_pathes_by_split["train"]) == 1 and len(dataset_pathes_by_split["validation"]) == 1, "Only support one dataset for now"
+    for split in ["train", "validation"]:
+        datasets[split].append(
+            NougatDataset(
+                dataset_path=dataset_pathes_by_split[split][0],
+                nougat_model=model_module.model,
+                max_length=config.max_length,
+                split=split,
+                root_name=config.root_name
             )
+        )
     data_module.train_datasets = datasets["train"]
     data_module.val_datasets = datasets["validation"]
+
+    print("Creating callbacks and logger...")
 
     lr_callback = LearningRateMonitor(logging_interval="step")
 
@@ -166,21 +172,21 @@ def train(config):
         dirpath=Path(config.result_path) / config.exp_name / config.exp_version,
     )
     grad_norm_callback = GradNormCallback()
-    custom_ckpt = CustomCheckpointIO()
+    # custom_ckpt = CustomCheckpointIO()
 
-    if not config.debug:
-        logger = Logger(config.exp_name, project="Nougat", config=dict(config))
-    else:
-        logger = TensorBoardLogger(
-            save_dir=config.result_path,
-            name=config.exp_name,
-            version=config.exp_version,
-            default_hp_metric=False,
-        )
+    # if not config.debug:
+    #     logger = Logger(config.exp_name, project="Nougat", config=dict(config))
+    # else:
+    logger = TensorBoardLogger(
+        save_dir=config.result_path,
+        name=config.exp_name,
+        version=config.exp_version,
+        default_hp_metric=False,
+    )
     trainer = pl.Trainer(
         num_nodes=config.get("num_nodes", 1),
         devices="auto",
-        strategy="ddp_find_unused_parameters_true",
+        # strategy="ddp_find_unused_parameters_true",
         accelerator="auto",
         # plugins=[SLURMEnvironment(auto_requeue=False)],
         max_epochs=config.max_epochs,
@@ -201,6 +207,7 @@ def train(config):
         ],
     )
 
+    print("Starting training...")
     trainer.fit(
         model_module,
         data_module,

@@ -1,9 +1,14 @@
 resume_from_checkpoint_path: null
 result_path: "result"
+root_name: "paired/2311"
 model_path: null
-dataset_paths: ["path/to/train.jsonl"]
+dataset_pathes_by_split:
+  train: ["data/train.jsonl"]
+  validation: ["data/validation.jsonl"]
+  test: ["data/test.jsonl"]
+test_dataset_paths: ["data/test.jsonl"]
 tokenizer: "dataset/tokenizer.json"
-exp_name: "nougat"
+exp_name: "nougat_2311"
 train_batch_sizes: [1]
 num_workers: 8
 val_batch_sizes: [1]

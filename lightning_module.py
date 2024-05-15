@@ -61,6 +61,7 @@ class NougatModelPLModule(pl.LightningModule):
         image_tensors, decoder_input_ids, attention_masks = list(), list(), list()
         if batch is None:
             return
+        print("train batch size", len(batch))
         for batch_data in batch:
             if batch_data is None or batch_data[0] is None:
                 continue
@@ -140,6 +141,7 @@ class NougatModelPLModule(pl.LightningModule):
             )
 
         assert max_iter is not None
+        print
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.config.lr)
         scheduler = {
             "scheduler": self.exponential_scheduler(
@@ -228,8 +230,9 @@ class NougatDataPLModule(pl.LightningDataModule):
             DataLoader(
                 torch.utils.data.ConcatDataset(self.val_datasets),
                 batch_size=self.val_batch_sizes[0],
+                num_workers=self.config.num_workers,
                 pin_memory=True,
-                shuffle=True,
+                shuffle=False,
                 collate_fn=self.ignore_none_collate,
             )
         ]
