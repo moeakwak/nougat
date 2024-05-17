@@ -1,6 +1,6 @@
 resume_from_checkpoint_path: null
 result_path: "result"
-root_name: "paired_standard"
+image_dir: "data/paired_standard"
 model_path: "model/nougat-0.1.0-base"
 dataset_pathes_by_split:
   train: ["data/train.jsonl"]
@@ -8,7 +8,7 @@ dataset_pathes_by_split:
   test: ["data/test.jsonl"]
 test_dataset_paths: ["data/test.jsonl"]
 tokenizer: "merged_tokenizer/tokenizer.json"
-exp_name: "nougat_finetune_cn_standard"
+exp_name: "nougat_finetune_test"
 train_batch_sizes: [1]
 num_workers: 8
 val_batch_sizes: [1]

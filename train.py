@@ -157,7 +157,7 @@ def train(config):
                 nougat_model=model_module.model,
                 max_length=config.max_length,
                 split=split,
-                root_name=config.root_name
+                image_dir=config.image_dir
             )
         )
     data_module.train_datasets = datasets["train"]
@@ -169,6 +169,12 @@ def train(config):
 
     checkpoint_callback = ModelCheckpoint(
         save_last=True,
+        save_top_k=5,
+        # every_n_train_steps=2000,
+        monitor="val/bleu",
+        mode="max",
+        auto_insert_metric_name=False,
+        filename="epoch={epoch}-step={step}-val_bleu={val/bleu:.2f}",
         dirpath=Path(config.result_path) / config.exp_name / config.exp_version,
     )
     grad_norm_callback = GradNormCallback()

@@ -133,7 +133,7 @@ class SciPDFDataset(Dataset):
     Args:
         path_to_index (str): Path to the index file.
         split (str, optional): Split of the dataset (e.g., "train", "test"). Default is "train".
-        subdir_name (str, optional): image 字段相对路径基于 path_to_root / subdir_name. Default is "".
+        image_dir (str, optional): image 字段相对路径基于 image_dir. Default is "".
         template (str, optional): Template for split naming. Default is "%s".
 
     Attributes:
@@ -146,13 +146,13 @@ class SciPDFDataset(Dataset):
         self,
         path_to_index: str,
         split: str = "train",
-        subdir_name="",
+        image_dir="",
     ) -> None:
         super().__init__()
         self.path_to_index = Path(path_to_index)
         self.path_to_root = self.path_to_index.parent
         self.split = split
-        self.subdir_name = subdir_name
+        self.image_dir = Path(image_dir)
         if not self.path_to_index.exists():
             raise ValueError(f'Dataset file for split "{split}" not found: {self.path_to_index}')
         self.dataset_file = None  # mulitprocessing
@@ -188,7 +188,7 @@ class SciPDFDataset(Dataset):
                 f"{self.split} JSONL for sample {index} could not be loaded at position {position}: {str(e)}\n`{line}`"
             )
             return self.empty_sample
-        img_path: Path = self.path_to_root / self.subdir_name / data.pop("image")
+        img_path: Path = self.image_dir / data.pop("image")
         if not img_path.exists():
             logging.info("Sample %s could not be found.", img_path)
             return self.empty_sample
@@ -216,7 +216,7 @@ class NougatDataset(Dataset):
         nougat_model: PreTrainedModel,
         max_length: int,
         split: str = "train",
-        root_name: str = "arxiv",
+        image_dir: str = "arxiv",
     ):
         super().__init__()
         self.nougat_model = nougat_model
@@ -225,7 +225,7 @@ class NougatDataset(Dataset):
         self.perturb = "NOUGAT_PERTURB" in os.environ and os.environ["NOUGAT_PERTURB"]
         # TODO improve naming conventions
         self.dataset = SciPDFDataset(
-            dataset_path, split=self.split, subdir_name=root_name
+            dataset_path, split=self.split, image_dir=image_dir
         )
         self.dataset_length = len(self.dataset)
 
