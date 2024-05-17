@@ -61,7 +61,7 @@ class NougatModelPLModule(pl.LightningModule):
         image_tensors, decoder_input_ids, attention_masks = list(), list(), list()
         if batch is None:
             return
-        print("train batch size", len(batch))
+        # print("train batch size", len(batch))
         for batch_data in batch:
             if batch_data is None or batch_data[0] is None:
                 continue
@@ -89,6 +89,7 @@ class NougatModelPLModule(pl.LightningModule):
         preds = self.model.inference(
             image_tensors=image_tensors,
             return_attentions=False,
+            early_stopping=False # issue 174
         )["predictions"]
         gts = self.model.decoder.tokenizer.batch_decode(
             markdown, skip_special_tokens=True

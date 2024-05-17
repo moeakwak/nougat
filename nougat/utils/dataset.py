@@ -4,6 +4,7 @@ Copyright (c) 2022-present NAVER Corp.
 MIT License
 Copyright (c) Meta Platforms, Inc. and affiliates.
 """
+import json
 import logging
 import os
 from math import prod
@@ -150,6 +151,7 @@ class SciPDFDataset(Dataset):
         super().__init__()
         self.path_to_index = Path(path_to_index)
         self.path_to_root = self.path_to_index.parent
+        self.split = split
         self.subdir_name = subdir_name
         if not self.path_to_index.exists():
             raise ValueError(f'Dataset file for split "{split}" not found: {self.path_to_index}')
@@ -173,18 +175,17 @@ class SciPDFDataset(Dataset):
     def __getitem__(self, index: int) -> Dict:
         position = self.seek_map[index]
         if self.dataset_file is None:
-            self.dataset_file = self.path_to_index.open()
+            self.dataset_file = self.path_to_index.open(encoding="utf-8")
         self.dataset_file.seek(position)
-        line = self.dataset_file.readline()
         try:
-            data: Dict = orjson.loads(line)
+            line = self.dataset_file.readline()
+            data: Dict = json.loads(line)
+        except UnicodeDecodeError as e:
+            logging.error(f"{self.split} could not be loaded at position {position}: {str(e)}`")
+            return self.empty_sample
         except Exception as e:
             logging.info(
-                "JSONL for sample %i could not be loaded at position %i: %s\n%s",
-                index,
-                position,
-                str(e),
-                line,
+                f"{self.split} JSONL for sample {index} could not be loaded at position {position}: {str(e)}\n`{line}`"
             )
             return self.empty_sample
         img_path: Path = self.path_to_root / self.subdir_name / data.pop("image")

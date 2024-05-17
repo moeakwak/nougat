@@ -22,12 +22,12 @@ if __name__ == "__main__":
     for file in args.src_file:
         seek_map = []
         seek_pos = 0
-        with open(file) as f:
+        with open(file, encoding="utf-8") as f:
             with tqdm(smoothing=0.0) as pbar:
                 line = f.readline()
                 while line:
                     seek_map.append(seek_pos)
-                    seek_pos = f.tell()
+                    seek_pos += len(line.encode("utf-8"))
                     line = f.readline()
                     pbar.update(1)
 

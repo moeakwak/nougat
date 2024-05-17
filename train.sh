@@ -1,1 +1,1 @@
-python train.py --config config/train_nougat.yaml
+python train.py --config config/nougat_finetune_cn_standard.yaml

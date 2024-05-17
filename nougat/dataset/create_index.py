@@ -60,24 +60,24 @@ def index_paper(directory: Path, args: argparse.Namespace):
     Pack all image-text pairs into a single h5 file and save it at `args.out`
     """
     paper = directory.name
-    markdowns = directory.glob("*.mmd")
-    meta_file = directory / "meta.json"
+    markdowns = directory.glob("*.md")
+    # meta_file = directory / "meta.json"
     data_samples = []
-    if not meta_file.exists():
-        return
+    # if not meta_file.exists():
+    #     return
     # load meta info
-    try:
-        meta = read_metadata(json.load(meta_file.open("r", encoding="utf-8")))
-    except json.JSONDecodeError:
-        return
+    # try:
+    #     meta = read_metadata(json.load(meta_file.open("r", encoding="utf-8")))
+    # except json.JSONDecodeError:
+    #     return
 
     for md_path in markdowns:
         image = md_path.parent / (md_path.stem + ".png")
         i = int(image.stem) - 1
         if not image.exists():
             continue
-        if i >= len(meta):
-            continue
+        # if i >= len(meta):
+        #     continue
         data_sample = {}
         ocr_path = image.parent / (image.stem + "_OCR.txt")
         if args.tesseract and not ocr_path.exists():
@@ -94,7 +94,7 @@ def index_paper(directory: Path, args: argparse.Namespace):
             data_sample["ocr"] = str(ocr_path.relative_to(args.root))
         data_sample["image"] = str(image.relative_to(args.root))
         data_sample["markdown"] = md_path.read_text(encoding="utf8").strip()
-        data_sample["meta"] = meta[i]
+        data_sample["meta"] = {}
         data_samples.append(data_sample)
     return data_samples
 
@@ -139,7 +139,7 @@ def create_index(args):
                 for page in item:
                     if len(page) == 0:
                         continue
-                    f.write(json.dumps(page) + "\n")
+                    f.write(json.dumps(page, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
