@@ -1,5 +1,6 @@
 resume_from_checkpoint_path: null
 result_path: "result"
+result_model_path: "result_model"
 image_dir: "data/paired_standard"
 model_path: "model/nougat-0.1.0-base"
 dataset_pathes_by_split:

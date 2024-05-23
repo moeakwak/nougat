@@ -85,6 +85,7 @@ def test(args):
             image_tensors=image_tensors,
             return_attentions=False,
         )["predictions"]
+        print("inference done...")
         predictions.extend(outputs)
         ground_truths.extend(ground_truth)
         with Pool(args.batch_size) as p:

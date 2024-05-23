@@ -167,6 +167,13 @@ def train(config):
 
     lr_callback = LearningRateMonitor(logging_interval="step")
 
+    model_save_dir = Path(config.result_model_path) / config.exp_name / config.exp_version
+    model_save_dir.mkdir(parents=True, exist_ok=True)
+
+    save_config_file(
+        config, model_save_dir
+    )
+
     checkpoint_callback = ModelCheckpoint(
         save_last=True,
         save_top_k=5,
@@ -175,7 +182,7 @@ def train(config):
         mode="max",
         auto_insert_metric_name=False,
         filename="epoch={epoch}-step={step}-val_bleu={val/bleu:.2f}",
-        dirpath=Path(config.result_path) / config.exp_name / config.exp_version,
+        dirpath=model_save_dir,
     )
     grad_norm_callback = GradNormCallback()
     # custom_ckpt = CustomCheckpointIO()
@@ -244,4 +251,5 @@ if __name__ == "__main__":
     save_config_file(
         config, Path(config.result_path) / config.exp_name / config.exp_version
     )
+    
     train(config)
