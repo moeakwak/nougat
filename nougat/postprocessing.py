@@ -8,7 +8,7 @@ from typing import Union, List
 import re
 import os
 import numpy as np
-from nltk.corpus import words
+# from nltk.corpus import words
 from multiprocessing import Pool
 from functools import partial
 from Levenshtein import ratio
@@ -430,17 +430,18 @@ def postprocess_single(generation: str, markdown_fix: bool = True) -> str:
     elif generation.split("\n")[-1].startswith(("#", "Figure", "Table")):
         generation = generation + "\n\n"
     else:
-        try:
-            last_word = generation.split(" ")[-1]
-            if last_word in words.words():
-                generation += " "
-        except LookupError:
+        generation += " "
+        # try:
+        #     last_word = generation.split(" ")[-1]
+        #     if last_word in words.words():
+        #         generation += " "
+        # except LookupError:
             # add space just in case. Will split words but better than concatenating them
-            generation += " "
+            # generation += " "
             # download for the next time
-            import nltk
+            # import nltk
 
-            nltk.download("words")
+            # nltk.download("words")
     # table corrections
     # remove obvious wrong tables
     for l in generation.split("\n"):

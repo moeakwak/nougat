@@ -145,9 +145,11 @@ class NougatModelPLModule(pl.LightningModule):
             reduce_fx="mean",
         )
 
+        self._compute_metrics(save=True)
+
         return None
 
-    def on_test_epoch_end(self):
+    def _compute_metrics(self, save: bool):
         if self.test_step_scores is None:
             raise Exception("No test scores")
         metrics = {}
@@ -161,31 +163,35 @@ class NougatModelPLModule(pl.LightningModule):
             final_scores[f"{metric}_accuracy"] = np.mean(vals)
         try:
             print(
-                f"Total number of samples: {len(vals)}, Edit Distance (ED) based accuracy score: {final_scores['edit_dist_accuracy']}, BLEU score: {final_scores['bleu_accuracy']}, METEOR score: {final_scores['meteor_accuracy']}"
+                f"Total number of samples: {len(vals)}, Edit Distance accuracy score: {final_scores['edit_dist_accuracy']}, BLEU score: {final_scores['bleu_accuracy']}, precision: {final_scores['precision']}"
             )
         except:
-            print(final_scores)
+            print(len(vals), final_scores)
             pass
 
-        save_dir = (
-            Path(self.config.get("test_result_dir", self.config.result))
-            / self.config.get('exp_name', 'exp') / self.config.get('exp_version', "result")
-        )
-        save_dir.mkdir(parents=True, exist_ok=True)
+        if save:
+            save_dir = (
+                Path(self.config.get("test_result_dir", "result_test"))
+                / self.config.get('exp_name', 'exp') / self.config.get('exp_version', "result")
+            )
+            save_dir.mkdir(parents=True, exist_ok=True)
 
-        scores_path = str(save_dir / "test_scores.json", "w")
-        with open(scores_path) as f:
-            json.dump(final_scores, f, ensure_ascii=False, indent=2)
+            scores_path = str(save_dir / "test_scores.json")
+            with open(scores_path, "w") as f:
+                json.dump(final_scores, f, ensure_ascii=False, indent=2)
 
-        paired_results = [
-            {"results": p, "scores": s}
-            for p, s in zip(self.test_step_results, self.test_step_scores)
-        ]
+            paired_results = [
+                {"results": p, "scores": s}
+                for p, s in zip(self.test_step_results, self.test_step_scores)
+            ]
 
-        results_path = str(save_dir / "test_results.json")
-        with open(results_path, "w") as f:
-            json.dump(paired_results, f, ensure_ascii=False, indent=2)
-        print(f"Saved test results to {save_dir}")
+            results_path = str(save_dir / "test_results.json")
+            with open(results_path, "w") as f:
+                json.dump(paired_results, f, ensure_ascii=False, indent=2)
+            print(f"Saved test results to {save_dir}")
+    
+    def on_test_epoch_end(self):
+        self._compute_metrics(save=True)
 
     def configure_optimizers(self):
         def _get_device_count():
@@ -326,7 +332,7 @@ class NougatDataPLModule(pl.LightningDataModule):
                 batch_size=self.test_batch_sizes[0],
                 num_workers=self.config.num_workers,
                 pin_memory=True,
-                shuffle=False,
+                shuffle=True,
                 collate_fn=self.ignore_none_collate,
             )
         ]

@@ -147,12 +147,14 @@ class SciPDFDataset(Dataset):
         path_to_index: str,
         split: str = "train",
         image_dir="",
+        log_error_samples=False
     ) -> None:
         super().__init__()
         self.path_to_index = Path(path_to_index)
         self.path_to_root = self.path_to_index.parent
         self.split = split
         self.image_dir = Path(image_dir)
+        self.log_error_samples = log_error_samples
         if not self.path_to_index.exists():
             raise ValueError(f'Dataset file for split "{split}" not found: {self.path_to_index}')
         self.dataset_file = None  # mulitprocessing
@@ -181,21 +183,25 @@ class SciPDFDataset(Dataset):
             line = self.dataset_file.readline()
             data: Dict = json.loads(line)
         except UnicodeDecodeError as e:
-            logging.error(f"{self.split} could not be loaded at position {position}: {str(e)}`")
+            if self.log_error_samples:
+                logging.error(f"{self.split} could not be loaded at position {position}: {str(e)}`")
             return self.empty_sample
         except Exception as e:
-            logging.info(
-                f"{self.split} JSONL for sample {index} could not be loaded at position {position}: {str(e)}\n`{line}`"
-            )
+            if self.log_error_samples:
+                logging.info(
+                    f"{self.split} JSONL for sample {index} could not be loaded at position {position}: {str(e)}\n`{line}`"
+                )
             return self.empty_sample
         img_path: Path = self.image_dir / data.pop("image")
         if not img_path.exists():
-            logging.info("Sample %s could not be found.", img_path)
+            if self.log_error_samples:
+                logging.info("Sample %s could not be found.", img_path)
             return self.empty_sample
         try:
             img = Image.open(img_path)
         except UnidentifiedImageError:
-            logging.info("Image %s could not be opened.", img_path)
+            if self.log_error_samples:
+                logging.info("Image %s could not be opened.", img_path)
             return self.empty_sample
         return {"image": img, "ground_truth": data.pop("markdown"), "meta": data}
 

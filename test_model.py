@@ -87,6 +87,7 @@ def test(args):
             f"Total number of samples: {len(vals)}, Edit Distance (ED) based accuracy score: {scores['edit_dist_accuracy']}, BLEU score: {scores['bleu_accuracy']}, METEOR score: {scores['meteor_accuracy']}"
         )
     except:
+        print(scores)
         pass
     if args.save_path:
         scores["predictions"] = predictions
