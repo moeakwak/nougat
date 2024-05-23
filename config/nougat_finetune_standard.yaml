@@ -6,7 +6,6 @@ dataset_pathes_by_split:
   train: ["data/standard/train.jsonl"]
   validation: ["data/standard/validation.jsonl"]
   test: ["data/standard/test.jsonl"]
-test_dataset_paths: ["data/standard/test.jsonl"]
 tokenizer: "merged_tokenizer/tokenizer.json"
 exp_name: "nougat_finetune_standard"
 train_batch_sizes: [1]

@@ -1,0 +1,1 @@
+tensorboard serve --logdir result --host=0.0.0.0
