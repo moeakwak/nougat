@@ -5,110 +5,105 @@ MIT License
 Copyright (c) Meta Platforms, Inc. and affiliates.
 """
 import argparse
-import json
+import datetime
 import os
-import logging
-from multiprocessing import Pool
-from collections import defaultdict
+from os.path import basename
 from pathlib import Path
 
-import numpy as np
+import lightning.pytorch as pl
 import torch
-from tqdm import tqdm
+from lightning.pytorch.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    Callback,
+    GradientAccumulationScheduler,
+)
+from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
+from lightning.pytorch.plugins import CheckpointIO
+from lightning.pytorch.plugins.environments import SLURMEnvironment
+from lightning.pytorch.utilities import rank_zero_only
+from sconf import Config
 
-from nougat import NougatModel
-from nougat.metrics import compute_metrics
-from nougat.utils.checkpoint import get_checkpoint
-from nougat.utils.dataset import NougatDataset
-from nougat.utils.device import move_to_device
-from lightning_module import NougatDataPLModule
+from nougat import NougatDataset
+from lightning_module import NougatDataPLModule, NougatModelPLModule
+
+import logging
+
+import warnings
+warnings.filterwarnings("ignore")
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 
-def test(args):
-    pretrained_model = NougatModel.from_pretrained(args.checkpoint)
-    pretrained_model = move_to_device(pretrained_model)
 
-    pretrained_model.eval()
+def test(config, ckpt_path: str):
+    pl.seed_everything(config.get("seed", 42), workers=True)
 
-    if args.save_path:
-        os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
-    else:
-        logging.warning("Results can not be saved. Please provide a -o/--save_path")
-    predictions = []
-    ground_truths = []
-    metrics = defaultdict(list)
-    dataset = NougatDataset(
-        dataset_path=args.dataset,
-        nougat_model=pretrained_model,
-        max_length=pretrained_model.config.max_length,
-        split=args.split,
+    print("Loading model and data modules...")
+    model_module = NougatModelPLModule(config)
+    data_module = NougatDataPLModule(config)
+
+    # add datasets to data_module
+    datasets = {"test": []}
+    dataset_pathes_by_split = config.dataset_pathes_by_split
+    for split in ["test"]:
+        datasets[split].append(
+            NougatDataset(
+                dataset_path=dataset_pathes_by_split[split][0],
+                nougat_model=model_module.model,
+                max_length=config.max_length,
+                split=split,
+                image_dir=config.image_dir
+            )
+        )
+    data_module.test_datasets = datasets["test"]
+
+    print("Creating logger...")
+
+    # if not config.debug:
+    #     logger = Logger(config.exp_name, project="Nougat", config=dict(config))
+    # else:
+    logger = TensorBoardLogger(
+        save_dir=config.test_result_dir,
+        name=config.exp_name,
+        version=Path(ckpt_path).stem,
+        default_hp_metric=False,
     )
 
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        num_workers=6,
-        pin_memory=True,
-        shuffle=args.shuffle,
-        collate_fn=NougatDataPLModule.ignore_none_collate,
+    trainer = pl.Trainer(
+        num_nodes=config.get("num_nodes", 1),
+        devices="auto",
+        strategy="ddp_find_unused_parameters_true",
+        accelerator="auto",
+        log_every_n_steps=15,
+        precision="bf16-mixed",
+        num_sanity_val_steps=0,
+        logger=logger
     )
 
-    for idx, sample in tqdm(enumerate(dataloader), total=len(dataloader)):
-        if sample is None:
-            continue
-        image_tensors, decoder_input_ids, _ = sample
-        if image_tensors is None:
-            return
-        if len(predictions) >= args.num_samples:
-            break
-        ground_truth = pretrained_model.decoder.tokenizer.batch_decode(
-            decoder_input_ids, skip_special_tokens=True
-        )
-        outputs = pretrained_model.inference(
-            image_tensors=image_tensors,
-            return_attentions=False,
-        )["predictions"]
-        predictions.extend(outputs)
-        ground_truths.extend(ground_truth)
-        with Pool(args.batch_size) as p:
-            _metrics = p.starmap(compute_metrics, iterable=zip(outputs, ground_truth))
-            for m in _metrics:
-                for key, value in m.items():
-                    metrics[key].append(value)
-
-            print({key: sum(values) / len(values) for key, values in metrics.items()})
-
-    scores = {}
-    for metric, vals in metrics.items():
-        scores[f"{metric}_accuracies"] = vals
-        scores[f"{metric}_accuracy"] = np.mean(vals)
-    try:
-        print(
-            f"Total number of samples: {len(vals)}, Edit Distance (ED) based accuracy score: {scores['edit_dist_accuracy']}, BLEU score: {scores['bleu_accuracy']}, METEOR score: {scores['meteor_accuracy']}"
-        )
-    except:
-        pass
-    if args.save_path:
-        scores["predictions"] = predictions
-        scores["ground_truths"] = ground_truths
-        with open(args.save_path, "w") as f:
-            json.dump(scores, f)
-
-    return predictions
+    print("Starting testing...")
+    trainer.test(
+        model_module,
+        data_module,
+        ckpt_path=ckpt_path,
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", "-c", type=Path, default=None)
-    parser.add_argument("-d", "--dataset", type=str, required=True)
-    parser.add_argument("--split", type=str, default="test")
-    parser.add_argument(
-        "--save_path", "-o", type=str, default=None, help="json file to save results to"
-    )
-    parser.add_argument("--num_samples", "-N", type=int, default=-1)
-    parser.add_argument("--shuffle", action="store_true")
-    parser.add_argument("--batch_size", "-b", type=int, default=10)
+    parser.add_argument("--config", type=str, required=True)
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--job", type=int, default=None)
+    parser.add_argument("--ckpt_path", type=str, default="last")
     args, left_argv = parser.parse_known_args()
-    args.checkpoint = get_checkpoint(args.checkpoint)
 
-    predictions = test(args)
+    config = Config(args.config)
+    config.argv_update(left_argv)
+    config.debug = args.debug
+    config.job = args.job
+    if not config.get("exp_name", False):
+        raise ValueError("exp_name is required")
+    config.exp_version = Path(args.ckpt_path).stem
+    
+    test(config, args.ckpt_path)

@@ -4,6 +4,8 @@ Copyright (c) 2022-present NAVER Corp.
 MIT License
 Copyright (c) Meta Platforms, Inc. and affiliates.
 """
+
+import json
 import math
 import random
 from pathlib import Path
@@ -24,6 +26,8 @@ class NougatModelPLModule(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.validation_step_outputs = []
+        self.test_step_scores = []  # {metric_key: value}
+        self.test_step_results = []  # list of {gt, pred}
         self.config = config
         if self.config.get("model_path", False):
             self.model = NougatModel.from_pretrained(
@@ -89,7 +93,7 @@ class NougatModelPLModule(pl.LightningModule):
         preds = self.model.inference(
             image_tensors=image_tensors,
             return_attentions=False,
-            early_stopping=False # issue 174
+            early_stopping=False,  # issue 174
         )["predictions"]
         gts = self.model.decoder.tokenizer.batch_decode(
             markdown, skip_special_tokens=True
@@ -108,6 +112,80 @@ class NougatModelPLModule(pl.LightningModule):
         ):
             self.log_dict(self.validation_step_outputs[0], sync_dist=True)
             self.validation_step_outputs.clear()
+
+    def test_step(self, batch, batch_idx):
+        if batch is None:
+            return
+        image_tensors, decoder_input_ids, _ = batch
+        if image_tensors is None:
+            return
+        markdown = pad_sequence(
+            decoder_input_ids,
+            batch_first=True,
+        )
+        preds = self.model.inference(
+            image_tensors=image_tensors,
+            return_attentions=False,
+            early_stopping=False,  # issue 174
+        )["predictions"]
+        gts = self.model.decoder.tokenizer.batch_decode(
+            markdown, skip_special_tokens=True
+        )
+        metrics = get_metrics(gts, preds, pool=False)
+        scores = {key: sum(values) / len(values) for key, values in metrics.items()}
+        self.test_step_scores.append(scores)
+        self.test_step_results.append(
+            [{"gt": gt, "pred": pred} for gt, pred in zip(gts, preds)]
+        )
+
+        self.log_dict(
+            {"test/" + key: values for key, values in scores.items()},
+            prog_bar=True,
+            on_step=True,
+            reduce_fx="mean",
+        )
+
+        return None
+
+    def on_test_epoch_end(self):
+        if self.test_step_scores is None:
+            raise Exception("No test scores")
+        metrics = {}
+        for scores in self.test_step_scores:
+            for key, value in scores.items():
+                metrics.setdefault(key, []).append(value)
+
+        final_scores = {}
+        for metric, vals in metrics.items():
+            final_scores[f"{metric}_accuracies"] = vals
+            final_scores[f"{metric}_accuracy"] = np.mean(vals)
+        try:
+            print(
+                f"Total number of samples: {len(vals)}, Edit Distance (ED) based accuracy score: {final_scores['edit_dist_accuracy']}, BLEU score: {final_scores['bleu_accuracy']}, METEOR score: {final_scores['meteor_accuracy']}"
+            )
+        except:
+            print(final_scores)
+            pass
+
+        save_dir = (
+            Path(self.config.get("test_result_dir", self.config.result))
+            / self.config.get('exp_name', 'exp') / self.config.get('exp_version', "result")
+        )
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        scores_path = str(save_dir / "test_scores.json", "w")
+        with open(scores_path) as f:
+            json.dump(final_scores, f, ensure_ascii=False, indent=2)
+
+        paired_results = [
+            {"results": p, "scores": s}
+            for p, s in zip(self.test_step_results, self.test_step_scores)
+        ]
+
+        results_path = str(save_dir / "test_results.json")
+        with open(results_path, "w") as f:
+            json.dump(paired_results, f, ensure_ascii=False, indent=2)
+        print(f"Saved test results to {save_dir}")
 
     def configure_optimizers(self):
         def _get_device_count():
@@ -206,8 +284,10 @@ class NougatDataPLModule(pl.LightningDataModule):
         self.config = config
         self.train_batch_sizes = self.config.train_batch_sizes
         self.val_batch_sizes = self.config.val_batch_sizes
+        self.test_batch_sizes = self.config.test_batch_sizes
         self.train_datasets = []
         self.val_datasets = []
+        self.test_datasets = []
         self.g = torch.Generator()
         self.g.manual_seed(self.config.seed)
 
@@ -239,6 +319,19 @@ class NougatDataPLModule(pl.LightningDataModule):
         ]
         return loaders
 
+    def test_dataloader(self):
+        loaders = [
+            DataLoader(
+                torch.utils.data.ConcatDataset(self.test_datasets),
+                batch_size=self.test_batch_sizes[0],
+                num_workers=self.config.num_workers,
+                pin_memory=True,
+                shuffle=False,
+                collate_fn=self.ignore_none_collate,
+            )
+        ]
+        return loaders
+    
     @staticmethod
     def seed_worker(wordker_id):
         worker_seed = torch.initial_seed() % 2**32

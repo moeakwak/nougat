@@ -4,7 +4,6 @@ Copyright (c) 2022-present NAVER Corp.
 MIT License
 Copyright (c) Meta Platforms, Inc. and affiliates.
 """
-
 import argparse
 import json
 import os
@@ -22,23 +21,11 @@ from nougat.metrics import compute_metrics
 from nougat.utils.checkpoint import get_checkpoint
 from nougat.utils.dataset import NougatDataset
 from nougat.utils.device import move_to_device
-from lightning_module import NougatModelPLModule, NougatDataPLModule
-from sconf import Config
-
-
-def load_module(ckpt_path: str, config: str):
-    # ckpt_dir = ckpt_path.parent
-    ckpt_path = Path(ckpt_path)
-    config = Config(config)
-    model = NougatModelPLModule.load_from_checkpoint(ckpt_path, config=config)
-    return model
+from lightning_module import NougatDataPLModule
 
 
 def test(args):
-    module = load_module(args.checkpoint, args.config)
-    config = Config(args.config)
-    pretrained_model = module.model
-
+    pretrained_model = NougatModel.from_pretrained(args.checkpoint)
     pretrained_model = move_to_device(pretrained_model)
 
     pretrained_model.eval()
@@ -50,15 +37,11 @@ def test(args):
     predictions = []
     ground_truths = []
     metrics = defaultdict(list)
-    assert args.split in config.dataset_pathes_by_split
-    dataset_path = config.dataset_pathes_by_split[args.split][0]
-    print("Evaluating model on dataset split: {} {}".format(args.split, dataset_path))
     dataset = NougatDataset(
-        dataset_path=dataset_path,
+        dataset_path=args.dataset,
         nougat_model=pretrained_model,
-        max_length=config.max_length,
+        max_length=pretrained_model.config.max_length,
         split=args.split,
-        image_dir=config.image_dir,
     )
 
     dataloader = torch.utils.data.DataLoader(
@@ -76,7 +59,7 @@ def test(args):
         image_tensors, decoder_input_ids, _ = sample
         if image_tensors is None:
             return
-        if args.num_samples != -1 and len(predictions) >= args.num_samples:
+        if len(predictions) >= args.num_samples:
             break
         ground_truth = pretrained_model.decoder.tokenizer.batch_decode(
             decoder_input_ids, skip_special_tokens=True
@@ -105,7 +88,6 @@ def test(args):
         )
     except:
         pass
-
     if args.save_path:
         scores["predictions"] = predictions
         scores["ground_truths"] = ground_truths
@@ -115,29 +97,18 @@ def test(args):
     return predictions
 
 
-def get_parser():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=None)
-    parser.add_argument(
-        "--checkpoint", "-c", type=Path, default=None, help=".ckpt文件路径"
-    )
+    parser.add_argument("--checkpoint", "-c", type=Path, default=None)
+    parser.add_argument("-d", "--dataset", type=str, required=True)
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument(
-        "--save_path",
-        "-o",
-        type=str,
-        default="result/test_result.json",
-        help="json file to save results to",
+        "--save_path", "-o", type=str, default=None, help="json file to save results to"
     )
     parser.add_argument("--num_samples", "-N", type=int, default=-1)
     parser.add_argument("--shuffle", action="store_true")
     parser.add_argument("--batch_size", "-b", type=int, default=10)
-    return parser
-
-
-if __name__ == "__main__":
-    parser = get_parser()
     args, left_argv = parser.parse_known_args()
-    # args.checkpoint = get_checkpoint(args.checkpoint)
+    args.checkpoint = get_checkpoint(args.checkpoint)
 
     predictions = test(args)

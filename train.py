@@ -147,10 +147,10 @@ def train(config):
     data_module = NougatDataPLModule(config)
 
     # add datasets to data_module
-    datasets = {"train": [], "validation": []}
+    datasets = {"train": [], "validation": [], "test": []}
     dataset_pathes_by_split = config.dataset_pathes_by_split
     assert len(dataset_pathes_by_split["train"]) == 1 and len(dataset_pathes_by_split["validation"]) == 1, "Only support one dataset for now"
-    for split in ["train", "validation"]:
+    for split in ["train", "validation", "test"]:
         datasets[split].append(
             NougatDataset(
                 dataset_path=dataset_pathes_by_split[split][0],
@@ -162,6 +162,7 @@ def train(config):
         )
     data_module.train_datasets = datasets["train"]
     data_module.val_datasets = datasets["validation"]
+    data_module.test_datasets = datasets["test"]
 
     print("Creating callbacks and logger...")
 
