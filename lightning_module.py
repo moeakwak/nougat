@@ -14,6 +14,7 @@ import numpy as np
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.utilities import rank_zero_only
+import torch.distributed
 from torch.nn.utils.rnn import pad_sequence
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
@@ -26,8 +27,9 @@ class NougatModelPLModule(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.validation_step_outputs = []
-        self.test_step_scores = []  # {metric_key: value}
-        self.test_step_results = []  # list of {gt, pred}
+        self.test_step_outputs = []
+        # self.test_step_scores = []  # {metric_key: value}
+        # self.test_step_results = []  # list of {gt, pred}
         self.config = config
         if self.config.get("model_path", False):
             self.model = NougatModel.from_pretrained(
@@ -132,12 +134,9 @@ class NougatModelPLModule(pl.LightningModule):
             markdown, skip_special_tokens=True
         )
         metrics = get_metrics(gts, preds, pool=False)
-        scores = {key: sum(values) / len(values) for key, values in metrics.items()}
-        self.test_step_scores.append(scores)
-        self.test_step_results.append(
-            [{"gt": gt, "pred": pred} for gt, pred in zip(gts, preds)]
-        )
+        results = [{"gt": gt, "pred": pred} for gt, pred in zip(gts, preds)]
 
+        scores = {key: sum(values) / len(values) for key, values in metrics.items()}
         self.log_dict(
             {"test/" + key: values for key, values in scores.items()},
             prog_bar=True,
@@ -145,25 +144,27 @@ class NougatModelPLModule(pl.LightningModule):
             reduce_fx="mean",
         )
 
-        self._compute_metrics(save=True)
+        output = {"metrics": metrics, "results": results}
 
-        return None
+        # self._compute_metrics([output], False)
 
-    def _compute_metrics(self, save: bool):
-        if self.test_step_scores is None:
+        return output
+
+    def _compute_metrics(self, outputs, save: bool):
+        if outputs is None:
             raise Exception("No test scores")
+
         metrics = {}
-        for scores in self.test_step_scores:
-            for key, value in scores.items():
+        for output in outputs:
+            for key, value in output["metrics"].items():
                 metrics.setdefault(key, []).append(value)
 
         final_scores = {}
         for metric, vals in metrics.items():
-            final_scores[f"{metric}_accuracies"] = vals
-            final_scores[f"{metric}_accuracy"] = np.mean(vals)
+            final_scores[metric] = np.mean(vals)
         try:
             print(
-                f"Total number of samples: {len(vals)}, Edit Distance accuracy score: {final_scores['edit_dist_accuracy']}, BLEU score: {final_scores['bleu_accuracy']}, precision: {final_scores['precision']}"
+                f"Total: {len(vals)}, Edit Distance accuracy score: {final_scores['edit_dist']:.2f}, BLEU score: {final_scores['bleu']:.2f}, precision: {final_scores['precision']:.2f}"
             )
         except:
             print(len(vals), final_scores)
@@ -172,7 +173,8 @@ class NougatModelPLModule(pl.LightningModule):
         if save:
             save_dir = (
                 Path(self.config.get("test_result_dir", "result_test"))
-                / self.config.get('exp_name', 'exp') / self.config.get('exp_version', "result")
+                / self.config.get("exp_name", "exp")
+                / self.config.get("exp_version", "result")
             )
             save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -180,18 +182,29 @@ class NougatModelPLModule(pl.LightningModule):
             with open(scores_path, "w") as f:
                 json.dump(final_scores, f, ensure_ascii=False, indent=2)
 
-            paired_results = [
-                {"results": p, "scores": s}
-                for p, s in zip(self.test_step_results, self.test_step_scores)
-            ]
-
-            results_path = str(save_dir / "test_results.json")
-            with open(results_path, "w") as f:
-                json.dump(paired_results, f, ensure_ascii=False, indent=2)
+            outputs_path = str(save_dir / "test_outputs.json")
+            with open(outputs_path, "w") as f:
+                json.dump(outputs, f, ensure_ascii=False, indent=2)
             print(f"Saved test results to {save_dir}")
-    
+
+    def on_test_batch_end(self, output, batch, batch_idx):
+        outputs = [None] * torch.distributed.get_world_size()
+        torch.distributed.all_gather_object(outputs, output)
+        torch.distributed.barrier()
+        if not self.trainer.is_global_zero:
+            return
+        print(f"batch {batch_idx}: Gathered {len(outputs)} step outputs")
+
+        self.test_step_outputs += outputs
+        self._compute_metrics(outputs, save=False)
+
     def on_test_epoch_end(self):
-        self._compute_metrics(save=True)
+        torch.distributed.barrier()
+        if not self.trainer.is_global_zero:
+            return
+        print(f"Total {len(self.test_step_outputs)} step outputs")
+
+        self._compute_metrics(self.test_step_outputs, save=True)
 
     def configure_optimizers(self):
         def _get_device_count():
@@ -337,7 +350,7 @@ class NougatDataPLModule(pl.LightningDataModule):
             )
         ]
         return loaders
-    
+
     @staticmethod
     def seed_worker(wordker_id):
         worker_seed = torch.initial_seed() % 2**32

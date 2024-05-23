@@ -9,7 +9,7 @@ import datetime
 import os
 from os.path import basename
 from pathlib import Path
-
+from torch.utils.data import Subset
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import (
@@ -37,7 +37,7 @@ logger.setLevel(logging.INFO)
 
 
 
-def test(config, ckpt_path: str):
+def test(config, ckpt_path: str, limit: int):
     pl.seed_everything(config.get("seed", 42), workers=True)
 
     print("Loading model and data modules...")
@@ -57,6 +57,10 @@ def test(config, ckpt_path: str):
                 image_dir=config.image_dir
             )
         )
+    assert len(datasets["test"]) == 1
+    if limit > 0 and limit < len(datasets["test"][0]):
+        datasets["test"][0] = Subset(datasets["test"][0], list(range(limit)))
+        print(f"\nLimit test-set to {limit} samples.")
     data_module.test_datasets = datasets["test"]
 
     print("Creating logger...")
@@ -96,6 +100,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--job", type=int, default=None)
     parser.add_argument("--ckpt_path", type=str, default="last")
+    parser.add_argument("--limit", type=int, default=-1)
     args, left_argv = parser.parse_known_args()
 
     config = Config(args.config)
@@ -106,4 +111,4 @@ if __name__ == "__main__":
         raise ValueError("exp_name is required")
     config.exp_version = Path(args.ckpt_path).stem
     
-    test(config, args.ckpt_path)
+    test(config, args.ckpt_path, args.limit)
