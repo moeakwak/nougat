@@ -4,6 +4,7 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
+
 import argparse
 from multiprocessing import Pool
 import re
@@ -36,7 +37,7 @@ def compute_metrics(pred, gt, minlen=4):
     #     metrics["meteor"] = nltk.translate.meteor([reference], hypothesis)
     # except LookupError:
     #     metrics["meteor"] = np.nan
-    metrics["meteor"] = np.nan
+    metrics["meteor"] = -1
     reference = set(reference)
     hypothesis = set(hypothesis)
     metrics["precision"] = nltk.scores.precision(reference, hypothesis)
@@ -84,17 +85,44 @@ def split_text(pages: List[str]):
     return text, math, table
 
 
-def get_metrics(gt: List[str], pred: List[str], pool: bool = True):
+def get_metrics(gts: List[str], preds: List[str], pool: bool = True):
     metrics = defaultdict(list)
+    assert len(gts) == len(preds), "pred and gt must have same length"
     if pool:
         with Pool() as p:
-            _metrics = p.starmap(compute_metrics, iterable=zip(pred, gt))
+            _metrics = p.starmap(compute_metrics, iterable=zip(preds, gts))
     else:
-        _metrics = [compute_metrics(p, g) for p, g in zip(pred, gt)]
+        _metrics = [compute_metrics(p, g) for p, g in zip(preds, gts)]
+
     for m in _metrics:
         for key, value in m.items():
             metrics[key].append(value)
     return dict(metrics)
+
+
+def get_step_results(gts: List[str], preds: List[str], pool: bool = True):
+    metrics = defaultdict(list)
+    assert len(gts) == len(preds), "pred and gt must have same length"
+    if pool:
+        with Pool() as p:
+            _metrics = p.starmap(compute_metrics, iterable=zip(preds, gts))
+    else:
+        _metrics = [compute_metrics(p, g) for p, g in zip(preds, gts)]
+
+    results = []
+    for i, m in enumerate(_metrics):
+        results.append(
+            {
+                "result": {"gt": gts[i], "pred": preds[i]},
+                "metrics": m,
+            }
+        )
+    
+    for m in _metrics:
+        for key, value in m.items():
+            metrics[key].append(value)
+            
+    return dict(metrics), results
 
 
 if __name__ == "__main__":

@@ -5,8 +5,10 @@ MIT License
 Copyright (c) Meta Platforms, Inc. and affiliates.
 """
 
+from collections import defaultdict
 import json
 import math
+from multiprocessing import Pool
 import random
 from pathlib import Path
 
@@ -20,17 +22,18 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 
 from nougat import NougatConfig, NougatModel
-from nougat.metrics import get_metrics
+from nougat.metrics import compute_metrics, get_metrics, get_step_results
 
+from sconf import Config
 
 class NougatModelPLModule(pl.LightningModule):
-    def __init__(self, config):
+    def __init__(self, config: Config):
         super().__init__()
         self.validation_step_outputs = []
-        self.test_step_outputs = []
-        # self.test_step_scores = []  # {metric_key: value}
-        # self.test_step_results = []  # list of {gt, pred}
+        self.test_step_outputs = []  # list of { metric: {...}, result: { gt, pred }}
+        self.test_saved_outputs_count = 0
         self.config = config
+        assert config.get("test_save_every_steps"), "test_save_every_steps must be set"
         if self.config.get("model_path", False):
             self.model = NougatModel.from_pretrained(
                 self.config.model_path,
@@ -133,9 +136,8 @@ class NougatModelPLModule(pl.LightningModule):
         gts = self.model.decoder.tokenizer.batch_decode(
             markdown, skip_special_tokens=True
         )
-        metrics = get_metrics(gts, preds, pool=False)
-        results = [{"gt": gt, "pred": pred} for gt, pred in zip(gts, preds)]
 
+        metrics, output = get_step_results(gts, preds, pool=False)
         scores = {key: sum(values) / len(values) for key, values in metrics.items()}
         self.log_dict(
             {"test/" + key: values for key, values in scores.items()},
@@ -144,13 +146,12 @@ class NougatModelPLModule(pl.LightningModule):
             reduce_fx="mean",
         )
 
-        output = {"metrics": metrics, "results": results}
-
-        # self._compute_metrics([output], False)
-
         return output
-
-    def _compute_metrics(self, outputs, save: bool):
+    
+    def _compute_metrics(self, outputs, save: bool, save_suffix: str = None):
+        """
+        outputs: [{ result: { pred: str, gt: str }, metrics: { ... } }]
+        """
         if outputs is None:
             raise Exception("No test scores")
 
@@ -171,6 +172,7 @@ class NougatModelPLModule(pl.LightningModule):
             pass
 
         if save:
+            assert save_suffix is not None, "save_suffix is None"
             save_dir = (
                 Path(self.config.get("test_result_dir", "result_test"))
                 / self.config.get("exp_name", "exp")
@@ -178,14 +180,16 @@ class NougatModelPLModule(pl.LightningModule):
             )
             save_dir.mkdir(parents=True, exist_ok=True)
 
-            scores_path = str(save_dir / "test_scores.json")
-            with open(scores_path, "w") as f:
-                json.dump(final_scores, f, ensure_ascii=False, indent=2)
+            # scores_path = str(save_dir / f"test_scores_{save_suffix}.json")
+            # with open(scores_path, "w") as f:
+            #     json.dump(final_scores, f, ensure_ascii=False, indent=2)
 
-            outputs_path = str(save_dir / "test_outputs.json")
+            outputs_path = str(save_dir / f"test_outputs_{save_suffix}.json")
             with open(outputs_path, "w") as f:
                 json.dump(outputs, f, ensure_ascii=False, indent=2)
-            print(f"Saved test results to {save_dir}")
+            print(f"Saved test results to {save_dir} ({save_suffix})")
+        
+        return final_scores
 
     def on_test_batch_end(self, output, batch, batch_idx):
         outputs = [None] * torch.distributed.get_world_size()
@@ -193,18 +197,34 @@ class NougatModelPLModule(pl.LightningModule):
         torch.distributed.barrier()
         if not self.trainer.is_global_zero:
             return
-        print(f"batch {batch_idx}: Gathered {len(outputs)} step outputs")
 
-        self.test_step_outputs += outputs
-        self._compute_metrics(outputs, save=False)
+        flattened_outputs = [item for sublist in outputs for item in sublist]
+        print(
+            f"batch {batch_idx}: Gathered {len(outputs)} device outputs, total {len(flattened_outputs)} steps"
+        )
+
+        self.test_step_outputs += flattened_outputs
+
+        if len(self.test_step_outputs) > self.config.get("test_save_every_steps", 1000):
+            current_steps = self.test_saved_outputs_count + len(self.test_step_outputs)
+            print(f"Save test results at step {self.test_saved_outputs_count}-{current_steps}")
+            self._compute_metrics(self.test_step_outputs, save=True, save_suffix=f"{self.test_saved_outputs_count}-{current_steps}")
+            self.test_saved_outputs_count += len(self.test_step_outputs)
+            self.test_step_outputs = []
+        else:
+            self._compute_metrics(flattened_outputs, save=False)
 
     def on_test_epoch_end(self):
         torch.distributed.barrier()
         if not self.trainer.is_global_zero:
             return
-        print(f"Total {len(self.test_step_outputs)} step outputs")
+        current_steps = self.test_saved_outputs_count + len(self.test_step_outputs)
+        print(f"Remain {len(self.test_step_outputs)}. Save test results at step {self.test_saved_outputs_count}-{current_steps}")
+        self._compute_metrics(self.test_step_outputs, save=True, save_suffix=f"{self.test_saved_outputs_count}-{current_steps}")
+        self.test_saved_outputs_count += len(self.test_step_outputs)
+        self.test_step_outputs = []
 
-        self._compute_metrics(self.test_step_outputs, save=True)
+        print(f"Done. Total saved: {self.test_saved_outputs_count}")
 
     def configure_optimizers(self):
         def _get_device_count():

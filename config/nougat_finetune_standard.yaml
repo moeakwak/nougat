@@ -14,7 +14,8 @@ train_batch_sizes: [1]
 num_workers: 8
 val_batch_sizes: [1]
 val_batches: 1
-test_batch_sizes: [2]
+test_batch_sizes: [8]
+test_save_every_steps: 1200
 input_size: [896, 672]
 max_length: 4096
 max_position_embeddings: 4096

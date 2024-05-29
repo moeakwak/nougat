@@ -78,6 +78,7 @@ def test(config, ckpt_path: str, limit: int):
     trainer = pl.Trainer(
         num_nodes=config.get("num_nodes", 1),
         devices="auto",
+        # devices=1,
         strategy="ddp_find_unused_parameters_true",
         accelerator="auto",
         log_every_n_steps=15,
