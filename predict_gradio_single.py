@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 print("loading model...")
-model = load_model(device="cuda:2")
+model = load_model()
 
 
 def get_examples():
@@ -37,11 +37,12 @@ def run_inference(image_inputs: list[Image.Image] | Image.Image):
 
     for i, pred in enumerate(preds):
         outputs.append(markdown_compatible(pred))
-        outputs.append("---")
 
-    result = "\n\n".join(outputs)
+    text_result = "\n\n".join(outputs)
 
-    return result, result
+    # md_result = text_result.replace(r"$$\n", " $$ ").replace(r"\n$$", " $$ ")
+
+    return text_result, text_result
 
     # submit_button.click(run_inference, inputs=images, outputs=output_boxes)
 
@@ -53,15 +54,17 @@ iface = gr.Interface(
     run_inference,
     inputs=[gr.Image(label="上传页面图像", type="pil")],
     outputs=[
+        gr.TextArea(label="预测结果"),
         gr.Markdown(
             label="预测结果",
             latex_delimiters=[
-                {"left": "$", "right": "$", "display": False},
-                {"left": "$$", "right": "$$", "display": True},
-            ],
-            line_breaks=True,
+                            {"left": "$$", "right": "$$", "display": True},
+                            {"left": "$", "right": "$", "display": False},
+                            {"left": "\\(", "right": "\\)", "display": False},
+                            {"left": "\\[", "right": "\\]", "display": True},
+                        ],
+            # line_breaks=True,
         ),
-        gr.TextArea(label="原始预测结果"),
     ],
     examples=examples,
     cache_examples="lazy",

@@ -10,7 +10,7 @@ from nougat.utils.dataset import ImageDataset
 from nougat.utils.device import default_batch_size, move_to_device
 
 
-def load_model(model_path="./model/nougat-standard-0529", full_precision=True, device="cuda:0"):
+def load_model(model_path="./nougat-standard-0529", full_precision=True, device="cuda:0"):
     model: NougatModel = NougatModel.from_pretrained(model_path)
     if not full_precision:
         model = model.to(torch.bfloat16)
